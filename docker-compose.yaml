@@ -1,0 +1,212 @@
+version: '3.3'
+services:
+  grafana:
+    profiles:
+      - backend
+      - all
+    image: grafana/grafana
+    container_name: grafana
+    restart: always
+    ports:
+      - 3000:3000
+    volumes:
+      - ./docker-volumes/grafana:/var/lib/grafana
+      - ./grafana/dashboard:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - grafana-net
+    depends_on:
+      - prometheus
+
+  prometheus:
+    profiles:
+      - backend
+      - all
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - ./docker-volumes/prometheus:/prometheus
+    networks:
+      - prometheus-net
+    command: --web.enable-lifecycle  --config.file=/etc/prometheus/prometheus.yaml
+
+  jaeger:
+    profiles:
+      - backend
+      - all
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+      COLLECTOR_OTLP_ENABLE: "true"
+    ports:
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 5778:5778
+      - 16685:16685
+      - 16686:16686
+      - 14250:14250
+      - 14268:14268
+      - 14269:14269
+      - 9411:9411
+    expose:
+      - 14250
+      - 14268/udp
+      - 14269
+      - 9411
+      - 5778
+      - 6831/udp
+      - 6832/udp
+      - 16686
+      - 16685
+    volumes:
+      - ./docker-volumes/jaeger:/var/lib/jaeger
+    networks:
+      - jaeger-net
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    profiles:
+      - backend
+      - all
+    image: otel/opentelemetry-collector:latest
+    container_name: otel-collector
+    ports:
+      - 4317:4317
+      - 1888:1888
+      - 8888:8888
+      - 8889:8889
+      - 13133:13133
+      - 55670:55670
+    expose:
+      - 4317
+      - 1888
+      - 8888
+      - 8889
+      - 13133
+      - 55670
+    networks:
+      - otel-collector-net
+    volumes:
+      - ./otel-collector:/etc/otel-collector
+    command: --config=/etc/otel-collector/config.yaml
+    depends_on:
+      - jaeger
+
+
+  frontend:
+    profiles:
+      - frontend
+      - all
+    image: rcsousa/olly:latest
+    container_name: frontend
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=frontend"
+    ports:
+      - 4000:4000
+    volumes:
+      - ./apps:/apps
+      - ./classes:/classes
+    networks:
+      - apps-net
+    command: opentelemetry-instrument --exporter_otlp_endpoint "otel-collector:4317" --exporter_otlp_traces_insecure true flask --app apps/frontend run -h '0.0.0.0' -p '4000'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - otel-collector
+      - grafana
+      - prometheus
+      - jaeger
+
+  backend-fast:
+    profiles:
+      - frontend
+      - all
+    image: rcsousa/olly:latest
+    container_name: backend_fast
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=backend-fast"
+    ports:
+      - 4001:4001
+    volumes:
+      - ./apps:/apps
+      - ./classes:/classes
+    networks:
+      - apps-net
+    command: opentelemetry-instrument --exporter_otlp_endpoint "otel-collector:4317" --exporter_otlp_traces_insecure true flask --app apps/backend_fast run -h '0.0.0.0' -p '4001'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - otel-collector
+      - grafana
+      - prometheus
+      - jaeger
+
+  backend_medium:
+    profiles:
+      - frontend
+      - all
+    image: rcsousa/olly:latest
+    container_name: backend_medium
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=backend_medium"
+    ports:
+      - 4002:4002
+    volumes:
+      - ./apps:/apps
+      - ./classes:/classes
+    networks:
+      - apps-net
+    command: opentelemetry-instrument --exporter_otlp_endpoint "otel-collector:4317" --exporter_otlp_traces_insecure true flask --app apps/backend_medium run -h '0.0.0.0' -p '4002'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - otel-collector
+      - grafana
+      - prometheus
+      - jaeger
+
+  backend_slow:
+    profiles:
+      - frontend
+      - all
+    image: rcsousa/olly:latest
+    container_name: backend_slow
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=backend_slow"
+    ports:
+      - 4003:4003
+    volumes:
+      - ./apps:/apps
+      - ./classes:/classes
+    networks:
+      - apps-net
+    command: opentelemetry-instrument --exporter_otlp_endpoint "otel-collector:4317" --exporter_otlp_traces_insecure true flask --app apps/backend_slow run -h '0.0.0.0' -p '4003'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - otel-collector
+      - grafana
+      - prometheus
+      - jaeger
+
+networks:
+  grafana-net:
+    name: olly
+  prometheus-net:
+    name: olly
+  jaeger-net:
+    name: olly
+  otel-collector-net:
+    name: olly
+  apps-net:
+    name: olly
+
+volumes:
+  grafana-data:
+  prometheus-data:
+
